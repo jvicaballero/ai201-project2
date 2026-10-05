@@ -11,7 +11,7 @@ can't tell which layer is lying to you.
     create_fit_card(outfit, new_item)              → str
 
 All three are stubs right now. They run and they do nothing — that's the
-starting position and it's deliberate.
+starting position and it's delibe rate.
 
 ⚠️ Before you write any of them, fill in the **Tool Inventory** section of your
 README (Milestone 2). Four lines per tool: what it does, each input with its
@@ -20,7 +20,9 @@ That last line is what your loop branches on. "Returns a list" earns nothing —
 the description has to say what is *in* the list.
 """
 
-import config  # noqa: F401 — you'll use this in search_listings
+import re
+
+import config
 from generate import generate
 from utils.data_loader import load_listings
 
@@ -78,8 +80,47 @@ def search_listings(
     Test it from a terminal before you move on:
         python -c "from tools import search_listings; print(search_listings('graphic tee', max_price=30))"
     """
-    # TODO: replace this with your implementation
-    return []
+    listings = load_listings()
+
+    if max_price is not None:
+        listings = [item for item in listings if item["price"] <= max_price]
+
+    if size is not None:
+        wanted_tokens = _size_tokens(size)
+        listings = [
+            item for item in listings
+            if wanted_tokens & _size_tokens(item["size"])
+        ]
+
+    query_words = set(re.findall(r"[a-z0-9]+", description.lower()))
+
+    scored = []
+    for item in listings:
+        haystack = " ".join([
+            item["title"],
+            item["description"],
+            item["category"],
+            " ".join(item["style_tags"]),
+        ]).lower()
+        item_words = set(re.findall(r"[a-z0-9]+", haystack))
+        score = len(query_words & item_words)
+        if score > 0:
+            scored.append((score, item))
+
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [item for _, item in scored[: config.SEARCH_RESULT_LIMIT]]
+
+
+def _size_tokens(size: str) -> set[str]:
+    """
+    Split a size string into comparable tokens.
+
+    "S/M" -> {"s", "m"}, "W30 L30" -> {"w30", "l30"}, "XL (oversized)" -> {"xl"}.
+    A plain substring check would match "L" inside "XL" and "S" inside "US 9",
+    so sizes are split on non-alphanumeric characters and compared as whole
+    tokens instead.
+    """
+    return set(re.findall(r"[a-z0-9]+", size.lower()))
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
@@ -112,8 +153,39 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
     Test it from a terminal before you move on:
         python -c "from tools import suggest_outfit; from utils.data_loader import get_example_wardrobe, load_listings; print(suggest_outfit(load_listings()[0], get_example_wardrobe()))"
     """
-    # TODO: replace this with your implementation
-    return ""
+    item_line = _describe_listing(new_item)
+    items = wardrobe.get("items") or []
+
+    if not items:
+        prompt = (
+            f"A thrift shopper is considering buying this item:\n{item_line}\n\n"
+            "They don't have any wardrobe info on file. Suggest one or two "
+            "general outfit ideas for this piece — what kind of pieces would "
+            "pair well with it, in terms of category and color. Keep it to "
+            "two or three sentences."
+        )
+    else:
+        wardrobe_lines = "\n".join(
+            f"- {it['name']} ({it['category']}, {', '.join(it['colors'])})"
+            for it in items
+        )
+        prompt = (
+            f"A thrift shopper is considering buying this item:\n{item_line}\n\n"
+            f"Here is their existing wardrobe:\n{wardrobe_lines}\n\n"
+            "Suggest one or two outfits that combine the new item with pieces "
+            "they already own. Name the specific wardrobe pieces by name. Keep "
+            "it to two or three sentences."
+        )
+
+    return generate(prompt)
+
+
+def _describe_listing(item: dict) -> str:
+    brand = item.get("brand") or "unbranded"
+    return (
+        f"{item['title']} — {brand}, {item['category']}, "
+        f"{', '.join(item['colors'])}, ${item['price']:.2f} on {item['platform']}"
+    )
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
@@ -152,5 +224,17 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
     Test it from a terminal before you move on:
         python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('jeans and white sneakers', load_listings()[0]))"
     """
-    # TODO: replace this with your implementation
-    return ""
+    if not outfit or not outfit.strip():
+        return "No fit card: there was no outfit suggestion to write one from."
+
+    item_line = _describe_listing(new_item)
+    prompt = (
+        f"Write a short social caption (two to four sentences) for a thrift "
+        f"find someone just bought.\n\n"
+        f"Item: {item_line}\n"
+        f"Outfit idea: {outfit}\n\n"
+        "Write it like a real post, not a product description. Mention the "
+        "item and its price and platform once each, and be specific about the "
+        "vibe. Don't use a product-listing tone."
+    )
+    return generate(prompt)

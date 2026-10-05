@@ -13,10 +13,44 @@ Build and test your three tools in `tools.py` first. Then come here.
     python agent.py          runs both example paths below
 """
 
+import re
+
 import config
 import trace
 from tools import search_listings, suggest_outfit, create_fit_card
 from generate import ModelUnavailable
+
+
+_PRICE_RE = re.compile(r"under\s*\$?\s*(\d+(?:\.\d+)?)", re.I)
+_SIZE_RE = re.compile(r"\bsize\s+([a-z0-9/.\s]+?)(?:,|$)", re.I)
+
+
+def parse_query(query: str) -> dict:
+    """
+    Pull a description, a size, and a max_price out of a plain-language query.
+
+    Plain regex, not the model — the phrasing this course's example queries use
+    ("under $30", "size M") is consistent enough that a regex is both cheaper
+    and more predictable than a model call for something this small.
+
+    "under $30" and "size M" are stripped out of the description so the
+    leftover keywords are what's left to search on.
+    """
+    max_price = None
+    price_match = _PRICE_RE.search(query)
+    if price_match:
+        max_price = float(price_match.group(1))
+
+    size = None
+    size_match = _SIZE_RE.search(query)
+    if size_match:
+        size = size_match.group(1).strip()
+
+    description = _PRICE_RE.sub("", query)
+    description = _SIZE_RE.sub("", description)
+    description = description.strip(" ,.")
+
+    return {"description": description, "size": size, "max_price": max_price}
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -107,8 +141,38 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     """
     session = new_session(query, wardrobe)
 
-    # TODO: delete these two lines and build the loop.
-    session["error"] = "The planning loop isn't built yet — see the TODO in agent.py."
+    trace.check_iterations(1)
+    session["parsed"] = parse_query(query)
+
+    results = search_listings(
+        session["parsed"]["description"],
+        size=session["parsed"]["size"],
+        max_price=session["parsed"]["max_price"],
+    )
+    session["search_results"] = results
+
+    if not results:
+        session["error"] = (
+            "No listings matched that. Try a broader description, a higher "
+            "price ceiling, or a different size."
+        )
+        return session
+
+    trace.check_iterations(2)
+    session["selected_item"] = results[0]
+
+    try:
+        session["outfit_suggestion"] = suggest_outfit(
+            session["selected_item"], session["wardrobe"]
+        )
+
+        trace.check_iterations(3)
+        session["fit_card"] = create_fit_card(
+            session["outfit_suggestion"], session["selected_item"]
+        )
+    except ModelUnavailable as exc:
+        session["error"] = str(exc)
+
     return session
 
 
