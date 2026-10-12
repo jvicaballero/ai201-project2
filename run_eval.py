@@ -37,8 +37,9 @@ import config
 import scenarios as scenario_module
 
 
-def run_once(scenario, use_trace=True):
+def run_once(scenario, use_trace=True, query=None):
     """One scenario, one try. Returns everything worth recording."""
+    import agent
     from agent import run_agent
     from utils.data_loader import get_example_wardrobe, get_empty_wardrobe
     import trace as trace_module
@@ -50,12 +51,26 @@ def run_once(scenario, use_trace=True):
     if use_trace:
         trace_module.start_trace()
 
-    record = {"error": None, "session": None, "trace": "", "crashed": None}
+    query = query or scenario["query"]
+    record = {"error": None, "session": None, "trace": "", "crashed": None,
+              "query": query, "outfit_input_id": None}
+
+    # Record the item suggest_outfit actually receives — criterion 3 compares
+    # it with session["selected_item"].
+    real_suggest = agent.suggest_outfit
+
+    def spy(new_item, wardrobe_arg):
+        record["outfit_input_id"] = new_item.get("id")
+        return real_suggest(new_item, wardrobe_arg)
+
+    agent.suggest_outfit = spy
     try:
-        record["session"] = run_agent(scenario["query"], wardrobe)
+        record["session"] = run_agent(query, wardrobe)
     except Exception as exc:  # noqa: BLE001 — a crash is a result worth logging
         record["crashed"] = f"{type(exc).__name__}: {exc}"
         record["traceback"] = traceback.format_exc()
+    finally:
+        agent.suggest_outfit = real_suggest
 
     if use_trace:
         record["trace"] = trace_module.get_trace()
@@ -93,9 +108,11 @@ def main():
         print(f"{scenario['name']}  ({scenario['wardrobe']} wardrobe)")
         print(f"  query: {scenario['query']}")
 
+        queries = scenario.get("queries")
         tries = []
         for attempt in range(1, args.tries + 1):
-            record = run_once(scenario)
+            query = queries[(attempt - 1) % len(queries)] if queries else None
+            record = run_once(scenario, query=query)
             tries.append(record)
 
             if record["crashed"]:
@@ -112,6 +129,25 @@ def main():
         print()
 
     write_report(rows, args)
+
+
+def score_row(row):
+    """
+    Apply the scenario's check() to each try. Returns [(passed, reason), ...],
+    or None for a diagnostic scenario with no check.
+
+    The pass rules live in scenarios.py, next to the criterion they came from.
+    """
+    check = row["scenario"].get("check")
+    if check is None:
+        return None
+    scores = []
+    for record in row["tries"]:
+        if record["crashed"]:
+            scores.append((False, f"crashed: {record['crashed']}"))
+        else:
+            scores.append(check(record))
+    return scores
 
 
 def write_report(rows, args):
@@ -142,6 +178,9 @@ def write_report(rows, args):
     ]
 
     for row in rows:
+        row["scores"] = score_row(row)
+
+    for row in rows:
         scenario = row["scenario"]
         number = scenario.get("criterion")
         # A scenario with "criterion": None is a diagnostic run, not one of
@@ -152,7 +191,17 @@ def write_report(rows, args):
             if number
             else f"{scenario['name']} _(diagnostic — not one of your five)_"
         )
-        lines.append(f"| {label_text} |  | {' | '.join([' '] * n)} |  |")
+        scores = row["scores"]
+        if scores is None:
+            lines.append(f"| {label_text} |  | {' | '.join([' '] * n)} |  |")
+        else:
+            cells = " | ".join("PASS" if ok else "FAIL" for ok, _ in scores)
+            passes = sum(ok for ok, _ in scores)
+            need = scenario["need"]
+            verdict = f"{'MET' if passes >= need else 'MISSED'} ({passes}/{n})"
+            lines.append(
+                f"| {label_text} | {need} of {n}: {scenario['target']} | {cells} | {verdict} |"
+            )
 
     lines += [
         "",
@@ -175,10 +224,15 @@ def write_report(rows, args):
         lines += [f"### {scenario['name']}", "",
                   f"- Query: `{scenario['query']}`",
                   f"- Wardrobe: {scenario['wardrobe']}", ""]
+        if row["scores"] is not None:
+            lines += [f"- Pass rule (from `scenarios.py`): {scenario['rule']}", ""]
 
         for i, record in enumerate(row["tries"], 1):
-            lines.append(f"**Try {i}**")
+            lines.append(f"**Try {i}** — query: `{record['query']}`")
             lines.append("")
+            if row["scores"] is not None:
+                ok, why = row["scores"][i - 1]
+                lines += [f"- {'PASS' if ok else 'FAIL'}: {why}", ""]
 
             if record["crashed"]:
                 lines += ["Crashed:", "", "```", record["crashed"], "```", ""]
