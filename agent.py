@@ -17,12 +17,13 @@ import re
 
 import config
 import trace
-from tools import search_listings, suggest_outfit, create_fit_card
+from mcp_client import call_tool
+from tools import suggest_outfit, create_fit_card
 from generate import ModelUnavailable
 
 
 _PRICE_RE = re.compile(r"under\s*\$?\s*(\d+(?:\.\d+)?)", re.I)
-_SIZE_RE = re.compile(r"\bsize\s+([a-z0-9/.\s]+?)(?:,|$)", re.I)
+_SIZE_RE = re.compile(r"\bsize\s+([a-z0-9/.\s]+?)(?=\s+under\b|,|$)", re.I)
 
 
 def parse_query(query: str) -> dict:
@@ -143,35 +144,47 @@ def run_agent(query: str, wardrobe: dict) -> dict:
 
     trace.check_iterations(1)
     session["parsed"] = parse_query(query)
+    trace.step("parse_query", inputs=query, returned=str(session["parsed"]),
+               note="regex, no model call")
 
-    results = search_listings(
-        session["parsed"]["description"],
-        size=session["parsed"]["size"],
-        max_price=session["parsed"]["max_price"],
-    )
+    results = call_tool("search_listings", {
+        "description": session["parsed"]["description"],
+        "size": session["parsed"]["size"],
+        "max_price": session["parsed"]["max_price"],
+    })
     session["search_results"] = results
+    trace.step("search_listings (via MCP)", inputs=str(session["parsed"]), returned=results)
 
     if not results:
         session["error"] = (
             "No listings matched that. Try a broader description, a higher "
             "price ceiling, or a different size."
         )
+        trace.step("branch: search returned nothing", note="set session['error'] and stop; "
+                   "suggest_outfit and create_fit_card are not called")
         return session
 
     trace.check_iterations(2)
     session["selected_item"] = results[0]
+    trace.step("select first result", returned=session["selected_item"])
 
     try:
         session["outfit_suggestion"] = suggest_outfit(
             session["selected_item"], session["wardrobe"]
         )
+        trace.step("suggest_outfit", inputs=session["selected_item"],
+                   returned=session["outfit_suggestion"],
+                   note=f"wardrobe items: {len(session['wardrobe'].get('items') or [])}")
 
         trace.check_iterations(3)
         session["fit_card"] = create_fit_card(
             session["outfit_suggestion"], session["selected_item"]
         )
+        trace.step("create_fit_card", inputs=session["selected_item"],
+                   returned=session["fit_card"])
     except ModelUnavailable as exc:
         session["error"] = str(exc)
+        trace.step("branch: model unavailable", note=str(exc)[:100])
 
     return session
 

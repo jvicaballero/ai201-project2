@@ -221,126 +221,143 @@ Scored these vintage Levi's 501s on Depop for just $38 and I am never taking the
 
 ## Run Log — Before
 
-<!-- Five criteria, five tries each, in this exact format.
-
-     Five, because your criteria are written out of five. Mark each try PASS
-     or FAIL, count the passes, and read that count against your target — a
-     row targeting 4 of 5 with three PASS cells is MISSED (3/5).
-
-     `python run_eval.py --label before` runs everything and writes the table
-     into results/. Paste it here and fill in the verdicts. -->
+Produced by `python run_eval.py --label before` (full log: `results/run_2026-10-12_0216_before.md`). Caching off, 5 tries per row. Criteria 3, 4 and 5 use five different queries, one per try; criteria 1 and 2 repeat one query five times. PASS/FAIL is decided by the check function for each criterion in `scenarios.py` (`check_1` … `check_5`), which restates the wording in `criteria.md`.
 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 | --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |
-| 1.        |        |       |       |       |       |       |         |
-| 2.        |        |       |       |       |       |       |         |
-| 3.        |        |       |       |       |       |       |         |
-| 4.        |        |       |       |       |       |       |         |
-| 5.        |        |       |       |       |       |       |         |
+| 1. matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. impossible query stops before the second tool | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. selected_item id equals the id suggest_outfit receives | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. fit card names the price and the platform | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 5. every search result is at or under the price ceiling | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| _extra, not one of the five:_ a requested size is honoured when a price follows it | 5 of 5 | FAIL | FAIL | FAIL | FAIL | FAIL | MISSED (0/5) |
 
-**Real output from one try**, pasted as text, naming the file and function
-that produced it:
+The extra row is a sixth diagnostic scenario I added after reading the traces of the first run, where I noticed `size` coming out as `None`. It is not one of my five criteria and I did not edit `criteria.md`.
+
+**Real output from one try** — `run_eval.py::main` calling `agent.py::run_agent`, which calls `tools.py::create_fit_card` (query `black cargo pants size W29 under $35`, try 1 of the size row). The user asked for size W29 and the trace shows `size: None`:
 
 ```
+[1] parse_query
+      in:  black cargo pants size W29 under $35
+      out: {'description': 'black cargo pants', 'size': None, 'max_price': 35.0}
+      →    regex, no model call
+[2] search_listings (via MCP)
+      in:  {'description': 'black cargo pants', 'size': None, 'max_price': 35.0}
+      out: 7 items: Low-Rise Cargo Pants — Khaki, Oversized Flannel Shirt — Plaid Red/Black, Corduroy Wide-Leg Pants — Rust … +4 more
+[3] select first result
+      out: Low-Rise Cargo Pants — Khaki ($27.0, poshmark)
 
+Fit card (tools.py::create_fit_card):
+Scored these vintage khaki cargos on Poshmark for just $27, and they are officially the backbone of my new off-duty uniform. Throwing them on with a crisp ribbed tank and chunky sneakers gives off the ultimate effortless Y2K vibe. Adding a cropped zip hoodie and my go-to black crossbody finishes the fit with just the right amount of edge.
+
+Check result: FAIL: asked for size W29, parsed size=None; 6 of 7 results are other sizes, e.g. [('Oversized Flannel Shirt — Plai', 'XL (oversized)'), ('Corduroy Wide-Leg Pants — Rust', 'W28')]
 ```
 
 ---
 
 ## Verdicts and Diagnoses
 
-<!-- MET or MISSED per criterion against LAST UNIT's target, plus a sentence on
-     how you decided.
-
-     Then, for every miss: which of the four places it happened — a tool, the
-     loop's branch, the session, or the model's output — AND the mechanism.
-
-     Not a diagnosis:  "The fit card was bad."
-     A diagnosis:      "The fit card criterion missed on 2 of 5 items. Both had
-                        an empty brand field. My prompt puts the brand in the
-                        first sentence, so the card opened with a blank and read
-                        like a fragment. The tool worked; the prompt assumed a
-                        field that isn't always there."
-
-     Look for a pattern. Three misses on the same tool is one problem, not
-     three. -->
-
 | #   | Criterion | Target | Verdict | How I decided |
 | --- | --------- | ------ | ------- | ------------- |
-| 1   |           |        |         |               |
-| 2   |           |        |         |               |
-| 3   |           |        |         |               |
-| 4   |           |        |         |               |
-| 5   |           |        |         |               |
+| 1   | A matching query completes all three tools | 4 of 5 | MET | 5 of 5 tries ended with no error, an outfit, and a real fit card. 5 ≥ 4. |
+| 2   | An impossible query stops before the second tool | 5 of 5 | MET | 5 of 5 tries: `suggest_outfit` was never called (a spy on it recorded nothing), outfit and fit card stayed `None`, and the error said what to change. |
+| 3   | `selected_item` id equals the id `suggest_outfit` receives | 5 of 5 | MET | A spy around `suggest_outfit` recorded the id it received; it matched `session["selected_item"]["id"]` on all 5 different queries. |
+| 4   | Fit card names its price and platform | 5 of 5 | MET | Each of the 5 cards contained `$<price>` and the platform name. |
+| 5   | Every search result is at or under the ceiling | 5 of 5 | MET | Across all 5 queries, every listing in `session["search_results"]` (not just the first) had `price <= X`. |
+| —   | _Extra:_ requested size is honoured | 5 of 5 | MISSED | 0 of 5. Every result list contained sizes other than the one asked for. |
 
 **Diagnoses**
+
+*The extra size row (0 of 5) — place: the loop's parse step, `agent.py::parse_query`, which feeds the tool.* `_SIZE_RE` was `\bsize\s+([a-z0-9/.\s]+?)(?:,|$)`: the size has to be followed by a comma or the end of the string. In all five queries a price follows the size (`size W29 under $35`), and the character class has no `$`, so the lazy match can never reach a comma or the end and the regex finds nothing. `size` comes out `None`, and `search_listings` — which worked correctly — is told to skip size filtering. The tool did what it was asked; the parser never asked it. This is one problem, not five: it appears every time a size is followed by "under $X". `90s track jacket in size M` (size at the end of the query) worked, which is why the five criteria never caught it — none of them has a size in it.
+
+*Criteria 1–5 had no misses, so a target was set too low.* Criterion 1's target of 4 of 5 was too low: it was 5 of 5 here and 5 of 5 again in the after-run, and the two things I gave as the reason (a zero-score search and a model hiccup) did not happen in 10 tries. A tighter target would be **5 of 5, with the search covering at least one query containing a size**. The reason I wrote for 4 of 5 also missed the failure that did exist: the size filter silently dropping out.
 
 ---
 
 ## Loop Trace
 
-<!-- One full run, printed step by step, with the MCP call visible in it.
+Added one `trace.step()` per step to `agent.py::run_agent`, including the MCP call, named `search_listings (via MCP)`. Printed with `python app.py ask '...' --trace`.
 
-     `python app.py ask '...' --trace` once you've added the trace.step()
-     calls in Milestone 2.
-
-     Worth pasting BOTH the happy path and the empty-search path. The empty
-     one should be visibly shorter, because it stops. If your two traces are
-     the same length, your branch isn't working — and this is the fastest way
-     anyone will ever find that out. -->
-
-**Happy path**
+**Happy path** — `python app.py ask 'vintage graphic tee under $30' --trace`
 
 ```
-
+[1] parse_query
+      in:  vintage graphic tee under $30
+      out: {'description': 'vintage graphic tee', 'size': None, 'max_price': 30.0}
+      →    regex, no model call
+[2] search_listings (via MCP)
+      in:  {'description': 'vintage graphic tee', 'size': None, 'max_price': 30.0}
+      out: 10 items: Y2K Baby Tee — Butterfly Print, Graphic Tee — 2003 Tour Bootleg Style, Vintage Band Tee — Faded Grey … +7 more
+[3] select first result
+      out: Y2K Baby Tee — Butterfly Print ($18.0, depop)
+[4] suggest_outfit
+      in:  Y2K Baby Tee — Butterfly Print ($18.0, depop)
+      out: Pair the Y2K butterfly baby tee with your baggy straight-leg dark wash jeans and chunky white sneakers for a c…
+      →    wardrobe items: 10
+[5] create_fit_card
+      in:  Y2K Baby Tee — Butterfly Print ($18.0, depop)
+      out: Scored this little butterfly tee on Depop for just $18 and I am officially ready to re-enter my 2000s pop prin…
 ```
 
-**Empty search**
+**Empty search** — `python app.py ask 'designer ballgown size XXS under $5' --trace` (three steps, then it stops)
 
 ```
+[1] parse_query
+      in:  designer ballgown size XXS under $5
+      out: {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+      →    regex, no model call
+[2] search_listings (via MCP)
+      in:  {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+      out: [] (empty)
+[3] branch: search returned nothing
+      →    set session['error'] and stop; suggest_outfit and create_fit_card are not called
 
+  No listings matched that. Try a broader description, a higher price ceiling, or a different size.
 ```
 
-**On the MCP move:** <!-- what changed in your code, and whether anything
-behaved differently afterwards. If the rewire didn't work, say exactly where it
-broke — the error text and the last thing that worked. That earns the point in
-full. -->
+(The size shows as `XXS` here because this trace was taken after the improvement below; before it, it was `None`.)
+
+**The three failure modes**
+
+- *Empty search:* above. Stops at step 3, no model call.
+- *Empty wardrobe:* `python app.py ask 'denim jacket under $50' --empty-wardrobe --trace`. Step 4 shows `wardrobe items: 0`, `suggest_outfit` returned general styling advice instead of raising, and a fit card was still produced.
+- *Model unreachable:* ran with a bad key (`GEMINI_API_KEY=badkey123 AI201_CACHE=0`). Steps 1–3 ran normally, then `[4] branch: model unavailable → The model rejected your API key. Check GEMINI_API_KEY in your .env file…` and the program printed that message with no stack trace (`agent.py::run_agent` catches `generate.ModelUnavailable`).
+
+**On the MCP move:** I uncommented and filled in the `search_listings` registration in `mcp_server.py` — name `search_listings`, typed inputs `description: str`, `size: str | None`, `max_price: float | None`, and a description written for a reader who cannot see the code (units, result fields, and that it returns `[]` rather than an error when nothing matches). The registered function only calls the original `tools.py::search_listings` under an alias. In `agent.py::run_agent` I replaced the direct call with `call_tool("search_listings", {...})` and removed the now-unused import. I compared the two on `graphic tee`, `max_price=30`: the lists were identical (6 and 6 items), and an impossible query returned `[]` over MCP, so the empty-search branch still works. Nothing behaved differently. The only visible cost is that each call starts a server process, so runs are slower.
 
 ---
 
 ## The Improvement
 
-<!-- What you changed, why your diagnosis pointed at it, and the after-run in
-     the same table format. One change, measured properly.
+**What I changed:** One line in `agent.py`: `_SIZE_RE` went from `\bsize\s+([a-z0-9/.\s]+?)(?:,|$)` to `\bsize\s+([a-z0-9/.\s]+?)(?=\s+under\b|,|$)`. The size now also ends where "under" begins.
 
-     `python run_eval.py --label after` -->
-
-**What I changed:**
-
-**Which failure it was meant to fix:**
+**Which failure it was meant to fix:** The size row's 0 of 5 above — `parse_query` returning `size: None` whenever a price follows the size, so `search_listings` was never asked to filter by size.
 
 ### Run Log — After
 
+Produced by `python run_eval.py --label after` (full log: `results/run_2026-10-12_0223_after.md`). Same scenarios, same queries.
+
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 | --------- | ------ | ----- | ----- | ----- | ----- | ----- | ------- |
-| 1.        |        |       |       |       |       |       |         |
-| 2.        |        |       |       |       |       |       |         |
-| 3.        |        |       |       |       |       |       |         |
-| 4.        |        |       |       |       |       |       |         |
-| 5.        |        |       |       |       |       |       |         |
+| 1. matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. impossible query stops before the second tool | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. selected_item id equals the id suggest_outfit receives | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. fit card names the price and the platform | 5 of 5 | PASS | FAIL | PASS | PASS | PASS | MISSED (4/5) |
+| 5. every search result is at or under the price ceiling | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| _extra:_ a requested size is honoured when a price follows it | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
 
-**Did it help, and how do I know:**
+**Did it help, and how do I know:** Yes for the thing I targeted. The size row went from 0 of 5 to 5 of 5, and the trace shows why: `size` is now `'W29'`, `'M'`, `'M'`, `'L'`, `'L'` instead of `None`, and every returned listing fits the requested size (for `black cargo pants size W29 under $35`, 1 result, size W29, instead of 7 results in mixed sizes). I also checked `parse_query` directly on `size W30 L30 under $40` (→ `W30 L30`), `size S, under $30`, and `90s track jacket in size M`, which still work.
 
-<!-- If it made things worse, say that. Honestly reported, that earns full
-     credit and is more interesting than one that worked. -->
+The after-run also had one miss I did not expect: **criterion 4 went from 5 of 5 to 4 of 5**. I don't think the change caused it, because the change is in `parse_query` and the fit card is written by `create_fit_card` from the selected item; the failing item (`silk slip dress in midi length under $40`, $30 on Depop) was selected the same way in both runs. The card it produced said *"…on Depop for just thirty bucks…"*. Place: the model's output. Mechanism: the prompt in `tools.py::create_fit_card` says to "mention the item and its price and platform once each" and never says to write the price as a dollar figure, and the temperature is 0.9 (`config.py`), so the model sometimes writes the price in words. My check (`$30`) reads that as missing. I'm reporting it rather than rerunning until it passes: one sample either way is thin, but it shows the 5 of 5 in the before-run was partly luck, not a guarantee.
 
 ---
 
 ## What's Still Broken
 
-<!-- For each criterion still missed: what you'd do, and why you stopped where
-     you did. "I ran out of time" is fine if it's true. Pretending nothing is
-     left is not. -->
+- **Criterion 4 (fit card price) is flaky.** Fix I would try: change the `create_fit_card` prompt to say "write the price as a dollar figure, e.g. $30" and lower the temperature. I did not do it because the unit asks for one change measured properly, and this one only showed up in the after-run, so I have no before/after for it.
+- **Criterion 1's target is too loose** (4 of 5 against 10 of 10 observed) and none of my five criteria cover size. I'd tighten criterion 1 to 5 of 5 and add a size criterion. I left `criteria.md` untouched: the unit says a target that was missed or too easy is not grounds for editing the original.
+- **Query parsing is still fragile in other ways.** `90s track jacket in size M` leaves the stray word `in` in the description (`'90s track jacket in'`), and the size rule only knows the phrasing "size X" followed by "under", a comma, or the end of the query.
+- **Search ranks by keyword overlap only.** `black cargo pants` ranked khaki cargo pants first. I didn't measure this and haven't tried a fix.
 
 <!-- ═════════════════════════════════════════════════════════════════════
 
